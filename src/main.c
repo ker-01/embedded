@@ -2,6 +2,22 @@
 #include "LCD1602.h"
 #include <string.h>
 
+I2C_HandleTypeDef hi2c1;
+
+static void MX_I2C1_Init(void)
+{
+    hi2c1.Instance = I2C1;
+    hi2c1.Init.Timing = 0x10909CEC;   // standard 100kHz timing for 80MHz clock
+    hi2c1.Init.OwnAddress1 = 0;
+    hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    hi2c1.Init.OwnAddress2 = 0;
+    hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+    hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+    HAL_I2C_Init(&hi2c1);
+}
+
 static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 
@@ -102,6 +118,7 @@ int main(void)
     HAL_Init();
     SystemClock_Config();
     MX_GPIO_Init();
+    MX_I2C1_Init();
     MX_TIM1_Init();
     HAL_TIM_Base_Start(&htim1); // Start TIM1 for microsecond delay
     lcd_init();
@@ -165,17 +182,16 @@ static void MX_GPIO_Init(void)
     HAL_GPIO_Init(GPIOA, &GPIO_InitStructA_led);
 
 
-    // LCD pin config (PB0-PB5)
-    // PB0 - RS, PB1 - E, PB2 - D4, PB3 - D5, PB4 - D6, PB5 - D7
-    //GND to VSS, RW, K
-    //5V to VDD, A
     __HAL_RCC_GPIOB_CLK_ENABLE();
-    GPIO_InitTypeDef GPIO_InitStructB_lcd = {0};
-    GPIO_InitStructB_lcd.Pin   = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5;
-    GPIO_InitStructB_lcd.Mode  = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStructB_lcd.Pull  = GPIO_NOPULL;
-    GPIO_InitStructB_lcd.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStructB_lcd);
+    __HAL_RCC_I2C1_CLK_ENABLE();
+
+    GPIO_InitTypeDef GPIO_InitStructI2C = {0};
+    GPIO_InitStructI2C.Pin       = GPIO_PIN_8 | GPIO_PIN_9;
+    GPIO_InitStructI2C.Mode      = GPIO_MODE_AF_OD;   // open-drain, required for I2C
+    GPIO_InitStructI2C.Pull      = GPIO_PULLUP;
+    GPIO_InitStructI2C.Speed     = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStructI2C.Alternate = GPIO_AF4_I2C1;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStructI2C);
 }
 
 static void SystemClock_Config(void)

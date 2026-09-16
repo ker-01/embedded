@@ -1,40 +1,27 @@
 #include "LCD1602.h"
 
-/* ---- Pin mapping: only place to edit if you rewire ---- */
-#define RS_PORT GPIOB
-#define RS_PIN  GPIO_PIN_0
-#define EN_PORT GPIOB
-#define EN_PIN  GPIO_PIN_1
-#define D4_PORT GPIOB
-#define D4_PIN  GPIO_PIN_2
-#define D5_PORT GPIOB
-#define D5_PIN  GPIO_PIN_3
-#define D6_PORT GPIOB
-#define D6_PIN  GPIO_PIN_4
-#define D7_PORT GPIOB
-#define D7_PIN  GPIO_PIN_5
+/* ---- I2C handle and PCF8574 backpack address ----
+ * Change to 0x3F << 1 if 0x27 doesn't respond. */
+#define LCD_I2C_ADDR (0x27 << 1)
+extern I2C_HandleTypeDef hi2c1;
 
-/* ---- Microsecond delay via TIM1 counting at 1 MHz ---- */
-extern TIM_HandleTypeDef htim1;
+/* PCF8574 bit layout: P7 P6 P5 P4 | P3 P2 P1 P0
+ *                      D7 D6 D5 D4 | BL EN RW RS   */
+#define LCD_BACKLIGHT 0x08
 
-void delay_us(uint16_t us)
+static void lcd_write_byte(uint8_t data)
 {
-    __HAL_TIM_SET_COUNTER(&htim1, 0);
-    while (__HAL_TIM_GET_COUNTER(&htim1) < us) { }
+    HAL_I2C_Master_Transmit(&hi2c1, LCD_I2C_ADDR, &data, 1, HAL_MAX_DELAY);
 }
 
-static void send_to_lcd(char data, int rs)
+static void send_to_lcd(uint8_t nibble, int rs)
 {
-    HAL_GPIO_WritePin(RS_PORT, RS_PIN, rs ? GPIO_PIN_SET : GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(D7_PORT, D7_PIN, ((data >> 3) & 0x01) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(D6_PORT, D6_PIN, ((data >> 2) & 0x01) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(D5_PORT, D5_PIN, ((data >> 1) & 0x01) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(D4_PORT, D4_PIN, ((data >> 0) & 0x01) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    uint8_t data = (nibble << 4) | LCD_BACKLIGHT | (rs ? 0x01 : 0x00);
 
-    HAL_GPIO_WritePin(EN_PORT, EN_PIN, GPIO_PIN_SET);
-    delay_us(20);
-    HAL_GPIO_WritePin(EN_PORT, EN_PIN, GPIO_PIN_RESET);
-    delay_us(20);
+    lcd_write_byte(data | 0x04);  // EN high
+    HAL_Delay(1);
+    lcd_write_byte(data & ~0x04); // EN low (latches data)
+    HAL_Delay(1);
 }
 
 void lcd_send_cmd(char cmd)
@@ -77,19 +64,16 @@ void lcd_init(void)
     send_to_lcd(0x03, 0);
     HAL_Delay(5);
     send_to_lcd(0x03, 0);
-    delay_us(150);
+    HAL_Delay(1);
     send_to_lcd(0x03, 0);
-    HAL_Delay(10);
-    send_to_lcd(0x02, 0);
-    HAL_Delay(10);
-    lcd_send_cmd(0x28);
     HAL_Delay(1);
-    lcd_send_cmd(0x08);
+    send_to_lcd(0x02, 0);   // switch to 4-bit mode
     HAL_Delay(1);
-    lcd_send_cmd(0x01);
+
+    lcd_send_cmd(0x28);     // 4-bit, 2 lines, 5x8 font
+    lcd_send_cmd(0x08);     // display off
+    lcd_send_cmd(0x01);     // clear
     HAL_Delay(2);
-    lcd_send_cmd(0x06);
-    HAL_Delay(1);
-    lcd_send_cmd(0x0C);
-    HAL_Delay(1);
+    lcd_send_cmd(0x06);     // cursor auto-increment
+    lcd_send_cmd(0x0C);     // display on, no cursor, no blink
 }
