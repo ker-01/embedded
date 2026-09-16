@@ -97,6 +97,7 @@ int main(void)
             printf("Key Pressed: %c\n", key);
             HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5); // Toggle onboard LED for visual feedback
             HAL_Delay(200); // Debounce delay
+            //test
         }
     }
 }
