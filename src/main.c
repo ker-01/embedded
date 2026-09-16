@@ -1,13 +1,22 @@
 #include "stm32l4xx_hal.h"
+#include "LCD1602.h"
+#include <string.h>
 
 static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+
+TIM_HandleTypeDef htim1;
+static void MX_TIM1_Init(void)
+{
+    __HAL_RCC_TIM1_CLK_ENABLE();
+    htim1.Instance = TIM1;
+    htim1.Init.Prescaler = 79;        // 80MHz / 80 = 1MHz
+    htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim1.Init.Period = 65535;
+    HAL_TIM_Base_Init(&htim1);
+}
+
 char get_keypad_input(void)
-
-//wian
-//ashtons
-
-
 {
 
     // Keypad layout
@@ -85,26 +94,48 @@ char get_keypad_input(void)
 }
 
 
+char display_buf[17] = {0};   // 16 chars + null terminator for 16x2 LCD
+int buf_pos = 0;
 
 int main(void)
 {
     HAL_Init();
     SystemClock_Config();
     MX_GPIO_Init();
+    MX_TIM1_Init();
+    HAL_TIM_Base_Start(&htim1); // Start TIM1 for microsecond delay
+    lcd_init();
+
+    lcd_put_cur(0, 0);
+    lcd_send_string("Enter key:");
 
     while (1)
     {
         char key = get_keypad_input();
         if (key != '\0')
         {
-            // Handle the key press (e.g., send it over UART, display it, etc.)
-            printf("Key Pressed: %c\n", key);
             HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5); // Toggle onboard LED for visual feedback
-            HAL_Delay(200); // Debounce delay
-            //test
+
+            if (key == '#') // treat '#' as clear
+            {
+                buf_pos = 0;
+                memset(display_buf, 0, sizeof(display_buf));
+                lcd_clear();
+                lcd_put_cur(0, 0);
+                lcd_send_string("Enter key:");
+            }
+            else if (buf_pos < 16)
+            {
+                display_buf[buf_pos++] = key;
+                lcd_put_cur(1, 0);          // print entered keys on row 2
+                lcd_send_string(display_buf);
+            }
+
+            HAL_Delay(200); // debounce delay
         }
     }
 }
+
 
 
 
@@ -132,6 +163,19 @@ static void MX_GPIO_Init(void)
     GPIO_InitStructA_led.Pull  = GPIO_NOPULL;
     GPIO_InitStructA_led.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStructA_led);
+
+
+    // LCD pin config (PB0-PB5)
+    // PB0 - RS, PB1 - E, PB2 - D4, PB3 - D5, PB4 - D6, PB5 - D7
+    //GND to VSS, RW, K
+    //5V to VDD, A
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    GPIO_InitTypeDef GPIO_InitStructB_lcd = {0};
+    GPIO_InitStructB_lcd.Pin   = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5;
+    GPIO_InitStructB_lcd.Mode  = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStructB_lcd.Pull  = GPIO_NOPULL;
+    GPIO_InitStructB_lcd.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStructB_lcd);
 }
 
 static void SystemClock_Config(void)
@@ -154,4 +198,6 @@ static void SystemClock_Config(void)
     RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
     HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0);
 }
+
+
 
