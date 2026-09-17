@@ -4,6 +4,37 @@
 
 I2C_HandleTypeDef hi2c1;
 
+volatile uint8_t button0_pressed_flag = 0;
+volatile uint8_t button1_pressed_flag = 0;
+
+volatile uint8_t button0_edge_pending = 0;
+volatile uint8_t button1_edge_pending = 0;
+
+volatile uint32_t button0_edge_tick = 0;
+volatile uint32_t button1_edge_tick = 0;
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    switch (GPIO_Pin)
+    {
+        case GPIO_PIN_1:
+            button0_edge_pending = 1;
+            button0_edge_tick = HAL_GetTick();
+            break;
+            
+        case GPIO_PIN_4:
+            button1_edge_pending = 1;
+            button1_edge_tick = HAL_GetTick();
+            break;
+
+ 
+        default:
+            break;
+    }
+
+    }
+
+
 static void MX_I2C1_Init(void)
 {
     hi2c1.Instance = I2C1;
@@ -113,6 +144,8 @@ char get_keypad_input(void)
 char display_buf[17] = {0};   // 16 chars + null terminator for 16x2 LCD
 int buf_pos = 0;
 
+static uint32_t last_toggle_tick0 = 0;
+static uint32_t last_toggle_tick1 = 0;
 int main(void)
 {
     HAL_Init();
@@ -124,28 +157,55 @@ int main(void)
     lcd_init();
 
     lcd_put_cur(0, 0);
-    lcd_send_string("Enter key:");
+    // lcd_send_string("Enter key:");
 
     while (1)
     {
+
+        if (button0_edge_pending)
+        {
+            button0_edge_pending = 0;
+            if (button0_edge_tick - last_toggle_tick0 > 150) // ignore bounces within 200ms
+            {
+                last_toggle_tick0 = button0_edge_tick;
+                button0_pressed_flag += 1;
+            }
+        }
+
+        if (button1_edge_pending)
+        {
+            button1_edge_pending = 0;
+            if (button1_edge_tick - last_toggle_tick1 > 150) // ignore bounces within 200ms
+            {
+                last_toggle_tick1 = button1_edge_tick;
+                button1_pressed_flag += 1;
+            }
+        }
+        lcd_put_cur(0, 10);
+        char status_buf[17];
+        snprintf(status_buf, sizeof(status_buf), "B0: %d", button0_pressed_flag);
+        lcd_send_string(status_buf);
+
+        lcd_put_cur(1, 10);
+        snprintf(status_buf, sizeof(status_buf), "B1: %d", button1_pressed_flag);
+        lcd_send_string(status_buf);
         char key = get_keypad_input();
         if (key != '\0')
         {
             HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5); // Toggle onboard LED for visual feedback
-
             if (key == '#') // treat '#' as clear
             {
                 buf_pos = 0;
                 memset(display_buf, 0, sizeof(display_buf));
                 lcd_clear();
                 lcd_put_cur(0, 0);
-                lcd_send_string("Enter key:");
+                // lcd_send_string("Enter key:");
             }
             else if (buf_pos < 16)
             {
                 display_buf[buf_pos++] = key;
                 lcd_put_cur(1, 0);          // print entered keys on row 2
-                lcd_send_string(display_buf);
+                // lcd_send_string(display_buf);
             }
 
             HAL_Delay(200); // debounce delay
@@ -182,6 +242,8 @@ static void MX_GPIO_Init(void)
     HAL_GPIO_Init(GPIOA, &GPIO_InitStructA_led);
 
 
+
+
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_I2C1_CLK_ENABLE();
 
@@ -192,7 +254,31 @@ static void MX_GPIO_Init(void)
     GPIO_InitStructI2C.Speed     = GPIO_SPEED_FREQ_HIGH;
     GPIO_InitStructI2C.Alternate = GPIO_AF4_I2C1;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStructI2C);
+
+    GPIO_InitTypeDef GPIO_InitStructButtons_A = {0};
+    GPIO_InitStructButtons_A.Pin   = GPIO_PIN_1;;
+    GPIO_InitStructButtons_A.Mode  = GPIO_MODE_IT_FALLING;  // interrupt on falling edge
+    GPIO_InitStructButtons_A.Pull  = GPIO_PULLUP;
+    GPIO_InitStructButtons_A.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStructButtons_A);
+
+    GPIO_InitTypeDef GPIO_InitStructButtons_B = {0};
+    GPIO_InitStructButtons_B.Pin   = GPIO_PIN_4;
+    GPIO_InitStructButtons_B.Mode  = GPIO_MODE_IT_FALLING;  // interrupt on falling edge
+    GPIO_InitStructButtons_B.Pull  = GPIO_PULLUP;
+    GPIO_InitStructButtons_B.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStructButtons_B);
+
+    HAL_NVIC_SetPriority(EXTI1_IRQn, 2, 0);
+    HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+
+    
+    HAL_NVIC_SetPriority(EXTI4_IRQn, 2, 0);
+    HAL_NVIC_EnableIRQ(EXTI4_IRQn);
+
 }
+
+
 
 static void SystemClock_Config(void)
 {
