@@ -13,6 +13,17 @@ volatile uint8_t button1_edge_pending = 0;
 volatile uint32_t button0_edge_tick = 0;
 volatile uint32_t button1_edge_tick = 0;
 
+const char *valid_ids[] = {
+    "22203658",
+    "22203659",
+    "0000"
+};
+
+const char candidates[] = {'A', 'B', 'C', 'D', 'E', 'F'};
+
+#define NUM_VALID_IDS (sizeof(valid_ids) / sizeof(valid_ids[0]))
+#define NUM_CANDIDATES (sizeof(candidates) / sizeof(candidates[0]))
+
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     switch (GPIO_Pin)
@@ -140,8 +151,98 @@ char get_keypad_input(void)
 
 }
 
+int check_valid_id(const char *id) {
+    for (size_t i = 0; i < NUM_VALID_IDS; ++i) { // Loop through the valid IDs
+        if (strcmp(id, valid_ids[i]) == 0) { //if the input ID matches a valid ID
+            return 1; // Valid ID
+        }
+    }
+    return 0; // Invalid ID
+}
 
-char display_buf[17] = {0};   // 16 chars + null terminator for 16x2 LCD
+static void button0_check(void)
+{
+    if (button0_edge_pending)
+    
+    button0_edge_pending = 0;
+    {
+     {
+     if (button0_edge_tick - last_toggle_tick0 > 150) // ignore bounces within 200ms
+         button0_pressed_flag += 1;
+            last_toggle_tick0 = button0_edge_tick;
+        }
+     }
+}
+
+static void button1_check(void)
+{
+    if (button1_edge_pending)
+    {
+        button1_edge_pending = 0;
+        if (button1_edge_tick - last_toggle_tick1 > 150) // ignore bounces within 200ms
+        {
+            button1_pressed_flag += 1;
+            last_toggle_tick1 = button1_edge_tick;
+        }
+    }
+}
+
+int authenticate_voter(void)
+{
+    char welcome[17];
+    snprintf(welcome, sizeof(welcome), "Enter ID:");
+    lcd_send_string(welcome);
+    lcd_put_cur(1, 0); // Move cursor to second line
+    while (1)
+    {   
+
+
+
+        // button0_check();
+        // button1_check();
+
+        char key = get_keypad_input();
+        if (key != '\0')
+        {
+            HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5); // Toggle onboard LED for visual feedback
+            if (key == '#') // treat '#' as clear
+            {
+                buf_pos = 0;
+                memset(id_input, 0, sizeof(id_input));
+                lcd_clear();
+                lcd_put_cur(0, 0);
+                // lcd_send_string("Enter key:");
+            }
+            else if (key == '*') // treat '*' as enter
+            {
+                id_input[buf_pos] = '\0'; // Null-terminate the string
+                if (check_valid_id(id_input))
+                {
+                    lcd_clear();
+                    lcd_put_cur(0, 0);
+                    lcd_send_string("Access Granted");
+                }
+                else
+                {
+                    lcd_clear();
+                    lcd_put_cur(0, 0);
+                    lcd_send_string("Access Denied");
+                }
+                buf_pos = 0; // Reset buffer position for next input
+                memset(id_input, 0, sizeof(id_input)); // Clear the buffer
+            }
+            else if (buf_pos < 16)
+            {
+                id_input[buf_pos++] = key;
+                lcd_put_cur(1, 0);          // print entered keys on row 2
+                lcd_send_string(id_input);
+            }
+        }
+    }
+}
+
+
+char id_input[17] = {0};   // 16 chars + null terminator for 16x2 LCD
 int buf_pos = 0;
 
 static uint32_t last_toggle_tick0 = 0;
@@ -159,60 +260,30 @@ int main(void)
     lcd_put_cur(0, 0);
     // lcd_send_string("Enter key:");
 
+    
+
     while (1)
-    {
+    // #button 1 = scroll uo
+    //button 2 = scroll down
+    // button 3 = select
+    /
+    {   
+        int authenticated = authenticate_voter();
 
-        if (button0_edge_pending)
+        if (authenticated)
         {
-            button0_edge_pending = 0;
-            if (button0_edge_tick - last_toggle_tick0 > 150) // ignore bounces within 200ms
-            {
-                last_toggle_tick0 = button0_edge_tick;
-                button0_pressed_flag += 1;
-            }
+            lcd_clear();
+            lcd_put_cur(0,0);
+            char vote_prompt[17];
+            snprintf(vote_prompt, sizeof(vote_prompt), "Vote for A-F");
+            lcd_send_string(vote_prompt);
+            HAL_Delay(1000); // Wait for 1 second before accepting vote
+            lcd_clear();
+
         }
 
-        if (button1_edge_pending)
-        {
-            button1_edge_pending = 0;
-            if (button1_edge_tick - last_toggle_tick1 > 150) // ignore bounces within 200ms
-            {
-                last_toggle_tick1 = button1_edge_tick;
-                button1_pressed_flag += 1;
-            }
-        }
-        lcd_put_cur(0, 10);
-        char status_buf[17];
-        snprintf(status_buf, sizeof(status_buf), "B0: %d", button0_pressed_flag);
-        lcd_send_string(status_buf);
-
-        lcd_put_cur(1, 10);
-        snprintf(status_buf, sizeof(status_buf), "B1: %d", button1_pressed_flag);
-        lcd_send_string(status_buf);
-        char key = get_keypad_input();
-        if (key != '\0')
-        {
-            HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5); // Toggle onboard LED for visual feedback
-            if (key == '#') // treat '#' as clear
-            {
-                buf_pos = 0;
-                memset(display_buf, 0, sizeof(display_buf));
-                lcd_clear();
-                lcd_put_cur(0, 0);
-                // lcd_send_string("Enter key:");
-            }
-            else if (buf_pos < 16)
-            {
-                display_buf[buf_pos++] = key;
-                lcd_put_cur(1, 0);          // print entered keys on row 2
-                // lcd_send_string(display_buf);
-            }
-
-            HAL_Delay(200); // debounce delay
-        }
     }
 }
-
 
 
 
