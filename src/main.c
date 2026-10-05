@@ -26,7 +26,9 @@ static uint32_t last_toggle_tick2 = 0;
 const char *valid_ids[] = {
     "22203659",
     "22203660",
-    "22210852", 
+    "22210852",
+    "22213178",
+    "22162982", 
 };
 
 char admin[] = "22203658";
@@ -111,10 +113,59 @@ static void MX_TIM1_Init(void)
 {
     __HAL_RCC_TIM1_CLK_ENABLE();
     htim1.Instance = TIM1;
-    htim1.Init.Prescaler = 79;        // 80MHz / 80 = 1MHz
+    htim1.Init.Prescaler = 3;        // 80MHz / 80 = 1MHz
     htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
     htim1.Init.Period = 65535;
     HAL_TIM_Base_Init(&htim1);
+}
+
+TIM_HandleTypeDef htim2;
+static void MX_TIM2_Init(void)
+{
+    __HAL_RCC_TIM2_CLK_ENABLE();
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = GPIO_PIN_10;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP; //push pull
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF1_TIM2; // Alternate function for TIM2
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    htim2.Instance = TIM2;
+    htim2.Init.Prescaler = 3;      // 4MHz / 4 = 1MHz = 1us per tick
+    htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim2.Init.Period = 19999;           // 1MHz / 20000 = 50Hz
+    htim2.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
+    htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+    HAL_TIM_PWM_Init(&htim2);                  // 1. PWM init FIRST
+
+    // set output compare
+    TIM_OC_InitTypeDef oc = {0};
+    oc.OCMode     = TIM_OCMODE_PWM1;
+    oc.Pulse      = 1500;               // 50% duty (out of Period + 1)
+    oc.OCPolarity = TIM_OCPOLARITY_HIGH;
+    oc.OCFastMode = TIM_OCFAST_DISABLE;
+    HAL_TIM_PWM_ConfigChannel(&htim2, &oc, TIM_CHANNEL_3);
+
+    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3); // 2. PWM start SECOND
+}
+
+#define SERVO_MIN_US 500     // 1ms pulse width
+#define SERVO_MAX_US 2500 // 2ms pulse width
+void servo_set_angle(uint8_t angle)
+{
+    if (angle > 180) angle = 180;
+    uint32_t pulse = SERVO_MIN_US + ((uint32_t)angle * (SERVO_MAX_US - SERVO_MIN_US)) / 180;
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, pulse);
+}
+
+void open_close_polling_booth(void)
+{
+    servo_set_angle(180); // Move servo to 180 degrees to open the booth
+    HAL_Delay(1000);     // Wait for 1 second to ensure the booth is fully open
+    servo_set_angle(0);   // Move servo back to 0 degrees to close the booth
+    HAL_Delay(1000);     // Wait for 1 second to ensure the booth
+    servo_set_angle(90);  // Move servo back to neutral position after closing
+    HAL_Delay(1000);     // Wait for 1 second to ensure the booth is fully closed
 }
 
 char get_keypad_input(void)
@@ -478,9 +529,11 @@ int main(void)
     MX_GPIO_Init();
     MX_I2C1_Init();
     MX_TIM1_Init();
+    MX_TIM2_Init();
     MX_USART2_UART_Init();
     HAL_TIM_Base_Start(&htim1); // Start TIM1 for microsecond delay
     lcd_init();
+    open_close_polling_booth(); // Open and close the polling booth at startup
 
     lcd_put_cur(0, 0);
     // lcd_send_string("Enter key:");
@@ -493,8 +546,7 @@ int main(void)
     // button 3 = select
     
 
-    {   
-
+    { 
         char id_input[17] = {0};
         int authenticated = authenticate_voter(id_input);
         int vote_submitted = 0;
@@ -533,6 +585,8 @@ int main(void)
                             vote_counts[candidate_index]++; // Increment the vote count for the selected candidate
                             snprintf(already_voted_IDS[number_of_voters], sizeof(already_voted_IDS[number_of_voters]), "%s", id_input); // Store the ID of the voter who has voted
                             number_of_voters++; // Increment the number of voters who have voted
+                            
+                            open_close_polling_booth(); // Open and close the polling booth after vote submission
                             HAL_Delay(2000); // Wait for 2 seconds before returning to authentication
                             vote_submitted = 1; // Set the flag to exit the voting loop
                             lcd_clear();
@@ -647,7 +701,6 @@ static void MX_GPIO_Init(void)
 
     HAL_GPIO_Init(GPIOA, &GPIO_InitStructUSART2);
 }
-
 
 
 
