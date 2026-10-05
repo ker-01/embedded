@@ -1,6 +1,7 @@
 #include "stm32l4xx_hal.h"
 #include "LCD1602.h"
 #include <string.h>
+#include <stdio.h>
 
 I2C_HandleTypeDef hi2c1;
 
