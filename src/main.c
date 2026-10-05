@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 I2C_HandleTypeDef hi2c1;
+UART_HandleTypeDef huart2;
 
 volatile uint8_t button0_pressed_flag = 0;
 volatile uint8_t button1_pressed_flag = 0;
@@ -25,6 +26,7 @@ static uint32_t last_toggle_tick2 = 0;
 const char *valid_ids[] = {
     "22203659",
     "22203660",
+    "22210852", 
 };
 
 char admin[] = "22203658";
@@ -39,19 +41,37 @@ const char candidates[] = {'A', 'B', 'C', 'D', 'E', 'F'};
 #define NUM_ADMIN_OPTIONS 3
 
 char vote_counts[NUM_CANDIDATES] = {0}; // Array to hold votes for each candidate
-char already_voted_IDS[NUM_VALID_IDS][11] = {0}; // Array to hold IDs that have already voted
+char already_voted_IDS[NUM_VALID_IDS][9] = {0}; // Array to hold IDs that have already voted
 int number_of_voters = 0; // Counter for the number of voters who have voted
+
+static void MX_USART2_UART_Init(void)
+{
+    __HAL_RCC_USART2_CLK_ENABLE();
+
+    huart2.Instance = USART2;
+    huart2.Init.BaudRate = 115200;
+    huart2.Init.WordLength = UART_WORDLENGTH_8B;
+    huart2.Init.StopBits = UART_STOPBITS_1;
+    huart2.Init.Parity = UART_PARITY_NONE;
+    huart2.Init.Mode = UART_MODE_TX_RX;
+    huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+    huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+    huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+
+    HAL_UART_Init(&huart2);
+}
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     switch (GPIO_Pin)
     {
-        case GPIO_PIN_1:
+        case GPIO_PIN_4:
             button0_edge_pending = 1;
             button0_edge_tick = HAL_GetTick();
             break;
             
-        case GPIO_PIN_4:
+        case GPIO_PIN_1:
             button1_edge_pending = 1;
             button1_edge_tick = HAL_GetTick();
             break;
@@ -297,6 +317,7 @@ int authenticate_voter(char *id_out)
                     lcd_clear();
                     lcd_put_cur(0, 0);
                     lcd_send_string("Access Granted");
+                    HAL_Delay(1000); // Wait for 1 second before returning
                     return 1; // Return 1 for successful authentication
                 }
                 else if (id_type == 2)
@@ -304,6 +325,7 @@ int authenticate_voter(char *id_out)
                     lcd_clear();
                     lcd_put_cur(0, 0);
                     lcd_send_string("Admin Access Granted");
+                    HAL_Delay(1000); // Wait for 1 second before entering admin menu
                     return 2; // Return 2 for admin authentication
                 }
                 else if (id_type == 3)
@@ -311,11 +333,17 @@ int authenticate_voter(char *id_out)
                     lcd_clear();
                     lcd_put_cur(0, 0);
                     lcd_send_string("Already Voted");
-                    return 0; // Return 0 for failed authentication
+                    HAL_Delay(1000);
+
+                    return 3; // Return 3 for already voted
                 }
                 else
                 {
+                    lcd_clear();
+                    lcd_put_cur(0, 0);
                     lcd_send_string("Access Denied");
+                    HAL_Delay(1000);
+                    lcd_clear();
                     return 0; // Return 0 for failed authentication
                 }
                 buf_pos = 0; // Reset buffer position for next input
@@ -343,6 +371,10 @@ void display_menu(int initialize) //0 is default, 1 is initialise
             candidate_index = 0; // Reset to the first candidate when initializing
         }
         lcd_clear();
+        lcd_put_cur(0, 8);
+        lcd_send_string("B0: ^");
+        lcd_put_cur(1, 8);
+        lcd_send_string("B1: v");
         lcd_put_cur(0, 0);
         lcd_send_string(">");
         char buffer[17] = {0}; // Buffer to hold the candidate character and null terminator
@@ -422,6 +454,22 @@ void admin_menu(void)
 
 }
 
+void print_vote_counts(void)
+{
+    char msg[50];
+    for (int i = 0; i < NUM_CANDIDATES; i++)
+    {
+        snprintf(msg, sizeof(msg),
+                 "Candidate %c: %d votes\r\n",
+                 candidates[i],
+                 vote_counts[i]);
+
+        HAL_UART_Transmit(&huart2,
+                          (uint8_t *)msg,
+                          strlen(msg),
+                          HAL_MAX_DELAY);
+    }
+}
 
 int main(void)
 {
@@ -430,6 +478,7 @@ int main(void)
     MX_GPIO_Init();
     MX_I2C1_Init();
     MX_TIM1_Init();
+    MX_USART2_UART_Init();
     HAL_TIM_Base_Start(&htim1); // Start TIM1 for microsecond delay
     lcd_init();
 
@@ -443,7 +492,9 @@ int main(void)
     //button 2 = scroll down
     // button 3 = select
     
+
     {   
+
         char id_input[17] = {0};
         int authenticated = authenticate_voter(id_input);
         int vote_submitted = 0;
@@ -482,10 +533,11 @@ int main(void)
                             vote_counts[candidate_index]++; // Increment the vote count for the selected candidate
                             snprintf(already_voted_IDS[number_of_voters], sizeof(already_voted_IDS[number_of_voters]), "%s", id_input); // Store the ID of the voter who has voted
                             number_of_voters++; // Increment the number of voters who have voted
-                            already_voted_IDS[number_of_voters - 1][0] = '\0'; // Clear the string for the new ID
                             HAL_Delay(2000); // Wait for 2 seconds before returning to authentication
                             vote_submitted = 1; // Set the flag to exit the voting loop
-                            
+                            lcd_clear();
+                            lcd_put_cur(0, 0);
+                            print_vote_counts();
                             break; // Exit the inner loop to return to authentication
                         }
 
@@ -496,6 +548,9 @@ int main(void)
                             lcd_send_string("Vote Cancelled");
                             HAL_Delay(2000); // Wait for 2 seconds before returning to authentication
                             vote_submitted = 1; // Set the flag to exit the voting loop
+                            lcd_clear();
+                            lcd_put_cur(0, 0);
+                            
                             break; // Exit the inner loop to return to authentication
                         }
                     }
@@ -581,6 +636,16 @@ static void MX_GPIO_Init(void)
 
     HAL_NVIC_SetPriority(EXTI9_5_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
+    GPIO_InitTypeDef GPIO_InitStructUSART2 = {0};
+
+    GPIO_InitStructUSART2.Pin = GPIO_PIN_2 | GPIO_PIN_3;
+    GPIO_InitStructUSART2.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStructUSART2.Pull = GPIO_NOPULL;
+    GPIO_InitStructUSART2.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStructUSART2.Alternate = GPIO_AF7_USART2;
+
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStructUSART2);
 }
 
 
@@ -606,6 +671,8 @@ static void SystemClock_Config(void)
     RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
     HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0);
 }
+
+
 
 
 
