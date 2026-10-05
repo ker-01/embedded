@@ -23,7 +23,7 @@ static uint32_t last_toggle_tick2 = 0;
 
 const char *valid_ids[] = {
     "22203659",
-    "0000"
+    "22203660",
 };
 
 char admin[] = "22203658";
@@ -35,8 +35,11 @@ const char candidates[] = {'A', 'B', 'C', 'D', 'E', 'F'};
 
 #define NUM_VALID_IDS (sizeof(valid_ids) / sizeof(valid_ids[0]))
 #define NUM_CANDIDATES (sizeof(candidates) / sizeof(candidates[0]))
+#define NUM_ADMIN_OPTIONS 3
 
 char vote_counts[NUM_CANDIDATES] = {0}; // Array to hold votes for each candidate
+char already_voted_IDS[NUM_VALID_IDS][11] = {0}; // Array to hold IDs that have already voted
+int number_of_voters = 0; // Counter for the number of voters who have voted
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
@@ -95,94 +98,54 @@ static void MX_TIM1_Init(void)
 
 char get_keypad_input(void)
 {
-
-    // Keypad layout
-
     const char keys[4][3] = {
-
         {'1', '2', '3'},
-
         {'4', '5', '6'},
-
         {'7', '8', '9'},
-
         {'*', '0', '#'}
-
     };
-
-
-
-    // Row and column pins
-
     const uint16_t row_pins[4] = {GPIO_PIN_4, GPIO_PIN_0, GPIO_PIN_6, GPIO_PIN_7};
-
     const uint16_t col_pins[3] = {GPIO_PIN_8, GPIO_PIN_9, GPIO_PIN_10};
 
-
-
     for (int row = 0; row < 4; row++)
-
     {
-
         // Set the current row low and others high
-
         for (int r = 0; r < 4; r++)
-
         {
-
             if (r == row)
-
                 HAL_GPIO_WritePin(GPIOA, row_pins[r], GPIO_PIN_RESET);
-
             else
-
                 HAL_GPIO_WritePin(GPIOA, row_pins[r], GPIO_PIN_SET);
-
         }
-
-
-
         // Check each column
-
         for (int col = 0; col < 3; col++)
-
         {
-
             if (HAL_GPIO_ReadPin(GPIOA, col_pins[col]) == GPIO_PIN_RESET)
-
             {
-
-                // Wait for key release
-
+               // Wait for key release
                 while (HAL_GPIO_ReadPin(GPIOA, col_pins[col]) == GPIO_PIN_RESET);
-
                 return keys[row][col];
-
             }
-
         }
-
     }
-
-
-
     return '\0'; // No key pressed
-
 }
 
-int check_valid_id(const char *id) {
-    for (size_t i = 0; i < NUM_VALID_IDS; ++i) { // Loop through the valid IDs
-        if (strcmp(id, valid_ids[i]) == 0) { //if the input ID matches a valid ID
-            return 1; // Valid ID
-        }
-        if (strcmp(id, admin) == 0) { // Check if the input ID matches the admin ID
-            return 2; // Admin ID
-        }
+    int check_valid_id(const char *id)
+    {
+        if (id[0] == '\0') return 0;                       // empty input
+        if (strcmp(id, admin) == 0) return 2;
+
+        for (int i = 0; i < number_of_voters; i++)
+            if (strcmp(id, already_voted_IDS[i]) == 0) return 3;
+
+        for (size_t i = 0; i < NUM_VALID_IDS; i++)
+            if (strcmp(id, valid_ids[i]) == 0) return 1;
+
+        return 0;
     }
-    return 0; // Invalid ID
-}
 
-static void button0_check(void)
+static int button0_check(void)
 // go up
 {
     if (button0_edge_pending)
@@ -202,9 +165,11 @@ static void button0_check(void)
                 {
                     candidate_index = candidate_index; // stay at the last candidate if already at the end
                 }
+                return 1;
             }
 
      }
+     return 0;
 }
 
 static void button0_check_admin(void)
@@ -216,19 +181,19 @@ static void button0_check_admin(void)
         {
             button0_pressed_flag += 1;
             last_toggle_tick0 = button0_edge_tick;
-            if (option_index > 0)
+            if (option_index < NUM_ADMIN_OPTIONS - 1)
             {
-                option_index--;
+                option_index++;
             }
             else
             {
-                option_index = option_index; // stay at the first option if already at the start
+                option_index = option_index; // stay at the last option if already at the end
             }
         }
     }
 }
 
-static void button1_check(void)
+static int button1_check(void)
 {
     if (button1_edge_pending)
     {
@@ -245,8 +210,10 @@ static void button1_check(void)
             {
                 candidate_index = candidate_index; // stay at the first candidate if already at the start
             }
+            return 1;
         }
     }
+    return 0;
 }
 
 static void button1_check_admin(void)
@@ -258,7 +225,7 @@ static void button1_check_admin(void)
         {
             button1_pressed_flag += 1;
             last_toggle_tick1 = button1_edge_tick;
-            if (option_index > 0)
+            if (option_index >  0) 
             {
                 option_index--;
             }
@@ -287,8 +254,15 @@ static int button2_check(void)
 }
 
 
+static void show_id_prompt(void)
+{
+    lcd_clear();
+    lcd_put_cur(0, 0);
+    lcd_send_string("Enter ID:");
+    lcd_put_cur(1, 0);
+}
 
-int authenticate_voter(void)
+int authenticate_voter(char *id_out)
 {
     char id_input[17] = {0};   // 16 chars + null terminator for 16x2 LCD
     int buf_pos = 0;
@@ -309,6 +283,7 @@ int authenticate_voter(void)
                 memset(id_input, 0, sizeof(id_input));
                 lcd_clear();
                 lcd_put_cur(0, 0);
+                show_id_prompt();
                 // lcd_send_string("Enter key:");
             }
             else if (key == '*') // treat '*' as enter
@@ -317,6 +292,7 @@ int authenticate_voter(void)
                 int id_type = check_valid_id(id_input);
                 if (id_type == 1)
                 {
+                    strcpy(id_out, id_input);
                     lcd_clear();
                     lcd_put_cur(0, 0);
                     lcd_send_string("Access Granted");
@@ -328,6 +304,13 @@ int authenticate_voter(void)
                     lcd_put_cur(0, 0);
                     lcd_send_string("Admin Access Granted");
                     return 2; // Return 2 for admin authentication
+                }
+                else if (id_type == 3)
+                {
+                    lcd_clear();
+                    lcd_put_cur(0, 0);
+                    lcd_send_string("Already Voted");
+                    return 0; // Return 0 for failed authentication
                 }
                 else
                 {
@@ -350,22 +333,30 @@ int authenticate_voter(void)
 
 
 
-void display_menu(void)
+void display_menu(int initialize) //0 is default, 1 is initialise
 {
-    lcd_clear();
-    lcd_put_cur(0, 0);
-    lcd_send_string(">");
-    char buffer[17] = {0}; // Buffer to hold the candidate character and null terminator
-    snprintf(buffer, sizeof(buffer), "%c", candidates[candidate_index]);
-    lcd_send_string(buffer);
-
-    if (candidate_index+1 < NUM_CANDIDATES)
+    if (button0_check() || button1_check() || initialize)
     {
-        lcd_put_cur(1, 0);
-        lcd_send_string(" ");
-        snprintf(buffer, sizeof(buffer), "%c", candidates[(candidate_index + 1)]);
+        if (initialize)
+        {
+            candidate_index = 0; // Reset to the first candidate when initializing
+        }
+        lcd_clear();
+        lcd_put_cur(0, 0);
+        lcd_send_string(">");
+        char buffer[17] = {0}; // Buffer to hold the candidate character and null terminator
+        snprintf(buffer, sizeof(buffer), "%c", candidates[candidate_index]);
         lcd_send_string(buffer);
+    
+        if (candidate_index+1 < NUM_CANDIDATES)
+        {
+            lcd_put_cur(1, 0);
+            lcd_send_string(" ");
+            snprintf(buffer, sizeof(buffer), "%c", candidates[(candidate_index + 1)]);
+            lcd_send_string(buffer);
+        }
     }
+    
 }
 
 void admin_menu(void)
@@ -380,7 +371,7 @@ void admin_menu(void)
     while(1)
     {
         lcd_send_string(">");
-        lcd_send_string(admin_options[0]);
+        lcd_send_string(admin_options[option_index]);
         if (option_index + 1 < 3)
         {
             lcd_put_cur(1, 0);
@@ -452,7 +443,8 @@ int main(void)
     // button 3 = select
     
     {   
-        int authenticated = authenticate_voter();
+        char id_input[17] = {0};
+        int authenticated = authenticate_voter(id_input);
         int vote_submitted = 0;
 
         if (authenticated == 1)
@@ -464,23 +456,21 @@ int main(void)
             lcd_send_string(vote_prompt);
             HAL_Delay(1000); // Wait for 1 second before accepting vote
             lcd_clear();
-            display_menu();
+            display_menu(1); // Initialize the menu display
             while (!vote_submitted)
             {
-                button0_check();
-                button1_check();
-                display_menu();
+                display_menu(0);
                 HAL_Delay(100);
                 if (button2_check())
                 {
                  lcd_clear();
                  lcd_put_cur(0, 0);
                  char buffer[17] = {0}; // Buffer to hold the candidate character and null terminator
-                 snprintf(buffer, sizeof(buffer), "Candidate Selected: %c", candidates[candidate_index]);
+                 snprintf(buffer, sizeof(buffer), "Vote for: %c", candidates[candidate_index]);
                  lcd_send_string(buffer);
                  lcd_put_cur(1, 0);
-                 lcd_send_string("Press again to confirm");
-                 float time = HAL_GetTick(); // 5 seconds timeout
+                 lcd_send_string("Press to confirm");
+                 uint32_t time = HAL_GetTick(); // 5 seconds timeout
                  while (1)
                     {
                         if (button2_check())
@@ -489,8 +479,12 @@ int main(void)
                             lcd_put_cur(0, 0);
                             lcd_send_string("Vote Submitted");
                             vote_counts[candidate_index]++; // Increment the vote count for the selected candidate
+                            snprintf(already_voted_IDS[number_of_voters], sizeof(already_voted_IDS[number_of_voters]), "%s", id_input); // Store the ID of the voter who has voted
+                            number_of_voters++; // Increment the number of voters who have voted
+                            already_voted_IDS[number_of_voters - 1][0] = '\0'; // Clear the string for the new ID
                             HAL_Delay(2000); // Wait for 2 seconds before returning to authentication
                             vote_submitted = 1; // Set the flag to exit the voting loop
+                            
                             break; // Exit the inner loop to return to authentication
                         }
 
