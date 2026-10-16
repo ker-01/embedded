@@ -36,7 +36,7 @@ char admin[] = "22203658";
 int candidate_index = 0;
 int option_index = 0;
 
-const char candidates[] = {'A', 'B', 'C', 'D', 'E', 'F'};
+const char *candidates[] = {"Candidate A", "Candidate B", "Candidate C", "Candidate D", "Candidate E", "Candidate F"};
 
 #define NUM_VALID_IDS (sizeof(valid_ids) / sizeof(valid_ids[0]))
 #define NUM_CANDIDATES (sizeof(candidates) / sizeof(candidates[0]))
@@ -161,9 +161,14 @@ void servo_set_angle(uint8_t angle)
 void open_close_polling_booth(void)
 {
     servo_set_angle(180); // Move servo to 180 degrees to open the booth
+    while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) == GPIO_PIN_SET) //while high, wait
+
+    {
+        HAL_Delay(10); // Poll every 10ms to check if the booth is fully open
+    
+    }
     HAL_Delay(1000);     // Wait for 1 second to ensure the booth is fully open
     servo_set_angle(0);   // Move servo back to 0 degrees to close the booth
-    HAL_Delay(1000);     // Wait for 1 second to ensure the booth
     servo_set_angle(90);  // Move servo back to neutral position after closing
     HAL_Delay(1000);     // Wait for 1 second to ensure the booth is fully closed
 }
@@ -445,65 +450,24 @@ void display_menu(int initialize) //0 is default, 1 is initialise
 
 void admin_menu(void)
 {
-    lcd_clear();
-    lcd_put_cur(0, 0);
-    static char admin_options[3][17] = {
-        "1. View Votes",
-        "2. Reset Votes",
-        "3. Exit"
-    };
-    while(1)
-    {
-        lcd_send_string(">");
-        lcd_send_string(admin_options[option_index]);
-        if (option_index + 1 < 3)
-        {
-            lcd_put_cur(1, 0);
-            lcd_send_string(" ");
-            lcd_send_string(admin_options[option_index + 1]);
-        }
-        button0_check_admin();
-        button1_check_admin();
-        int select = button2_check();
-        if (select)
-        {
-            if (option_index == 0) // View Votes
-            {
-                lcd_clear();
-                lcd_put_cur(0, 0);
-                char buffer[17];
-                for (int i = 0; i < NUM_CANDIDATES; i++)
-                {
-                    snprintf(buffer, sizeof(buffer), "%c: %d", candidates[i], vote_counts[i]);
-                    lcd_put_cur(i % 2, 0); // Display on row 0 or 1
-                    lcd_send_string(buffer);
-                    if (i % 2 == 1 || i == NUM_CANDIDATES - 1) // Wait for user to press button to continue
-                    {
-                        while (!button2_check())
-                        {
-                            HAL_Delay(100);
-                        }
-                        lcd_clear();
-                    }
-                }
-            }
-            else if (option_index == 1) // Reset Votes
-            {
-                memset(vote_counts, 0, sizeof(vote_counts));
-                lcd_clear();
-                lcd_put_cur(0, 0);
-                lcd_send_string("Votes Reset");
-                HAL_Delay(2000); // Display for 2 seconds
-            }
-            else if (option_index == 2) // Exit
-            {
-                return; // Exit admin menu
-            }
-        }
-    }
-
-
+    print_vote_counts();
 }
+
+
+void print_receipt(void)
+{
+    char msg[50];
+
+    snprintf(msg, sizeof(msg),
+             "Vote for: %s\r\n",
+             candidates[candidate_index]);
+
+    HAL_UART_Transmit(&huart2,
+                      (uint8_t *)msg,
+                      strlen(msg),
+                      HAL_MAX_DELAY);
+}
+
 
 void print_vote_counts(void)
 {
@@ -582,16 +546,32 @@ int main(void)
                             lcd_clear();
                             lcd_put_cur(0, 0);
                             lcd_send_string("Vote Submitted");
+                            lcd_put_cur(1, 0);
+                            lcd_send_string("Printing Receipt...");
+                            print_receipt(); // Print the receipt via UART
                             vote_counts[candidate_index]++; // Increment the vote count for the selected candidate
                             snprintf(already_voted_IDS[number_of_voters], sizeof(already_voted_IDS[number_of_voters]), "%s", id_input); // Store the ID of the voter who has voted
                             number_of_voters++; // Increment the number of voters who have voted
                             
+                            HAL_Delay(1000); // Wait for 1 second before opening and closing the polling booth
+                            lcd_clear();
+                            lcd_put_cur(0, 0);
+                            lcd_send_string("Opening Polling Booth...");
+                            HAL_Delay(1000); // Wait for 1 second before opening the polling booth
+                            lcd_clear();
+                            lcd_put_cur(0, 0);
+                            lcd_send_string("Place Receipt in Booth");
+                            lcd_put_cur(1, 0);
+                            lcd_send_string("Then press to close");
                             open_close_polling_booth(); // Open and close the polling booth after vote submission
+
+                            lcd_clear();
+                            lcd_put_cur(0, 0);
+                            lcd_send_string("Vote Submitted!");
                             HAL_Delay(2000); // Wait for 2 seconds before returning to authentication
                             vote_submitted = 1; // Set the flag to exit the voting loop
                             lcd_clear();
                             lcd_put_cur(0, 0);
-                            print_vote_counts();
                             break; // Exit the inner loop to return to authentication
                         }
 
@@ -680,6 +660,14 @@ static void MX_GPIO_Init(void)
     GPIO_InitStructButtons_B.Pull  = GPIO_PULLUP;
     GPIO_InitStructButtons_B.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStructButtons_B);
+
+    GPIO_InitTypeDef GPIO_InitStructButtons_A_polling = {0};
+    GPIO_InitStructButtons_A_polling.Pin   = GPIO_PIN_11;
+    GPIO_InitStructButtons_A_polling.Mode  = GPIO_MODE_INPUT;  // polling mode
+    GPIO_InitStructButtons_A_polling.Pull  = GPIO_PULLUP;
+    GPIO_InitStructButtons_A_polling.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStructButtons_A_polling);
+
 
     HAL_NVIC_SetPriority(EXTI1_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(EXTI1_IRQn);
